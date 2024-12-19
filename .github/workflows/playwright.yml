@@ -1,0 +1,106 @@
+name: e2e-tests
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Install Docker Compose
+      run: |
+        DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+        mkdir -p $DOCKER_CONFIG/cli-plugins
+        curl -SL https://github.com/docker/compose/releases/download/v2.24.1/docker-compose-linux-x86_64 -o $DOCKER_CONFIG/cli-plugins/docker-compose
+        chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+
+    - name: Start Docker Compose Services
+      run: |
+        docker compose build --no-cache
+        docker compose up -d
+
+    - name: Wait for all services to be healthy
+      run: |
+        echo "Waiting for services to be ready..."
+        timeout=300
+        start_time=$(date +%s)
+
+        sleep 30
+
+        while true; do
+          current_time=$(date +%s)
+          elapsed=$((current_time - start_time))
+
+          # Check if backend is ready by attempting to access the register endpoint
+          # A 405 Method Not Allowed means the service is up
+          if curl -f http://localhost:8000/register -X GET 2>/dev/null || [ $? -eq 22 ]; then
+            echo "Backend is ready!"
+            BACKEND_READY=1
+          else
+            echo "Backend not ready... ($elapsed seconds)"
+            echo "Backend response:"
+            curl -v http://localhost:8000/register -X GET || true
+          fi
+
+          # Check if frontend is ready
+          if curl -f http://localhost/login 2>/dev/null; then
+            echo "Frontend is ready!"
+            FRONTEND_READY=1
+          else
+            echo "Frontend not ready... ($elapsed seconds)"
+            echo "Frontend response:"
+            curl -v http://localhost/login || true
+          fi
+
+          # If both are ready, break
+          if [ ! -z "$BACKEND_READY" ] && [ ! -z "$FRONTEND_READY" ]; then
+            echo "All services are ready!"
+            break
+          fi
+
+          # Check timeout
+          if [ $elapsed -ge $timeout ]; then
+            echo "Services failed to start within timeout"
+            docker compose logs
+            exit 1
+          fi
+
+          sleep 5
+        done
+
+    - name: Run Playwright tests
+      env:
+        CI: true
+        PLAYWRIGHT_TEST_BASE_URL: http://localhost
+      run: npx playwright test
+
+    - name: Stop Docker Compose Services
+      if: always()
+      run: docker compose down
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30

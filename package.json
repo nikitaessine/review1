@@ -1,0 +1,14 @@
+{
+  "name": "testing-course-bunnybook",
+  "version": "1.0.0",
+  "description": "See original work here: https://github.com/pietrobassi/bunnybook. This is just for university assignment.",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.10.1"
+  }
+}
